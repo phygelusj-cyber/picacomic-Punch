@@ -1,7 +1,6 @@
 name: picacgPunch
 
 on:
-
   push:
     branches: [ main ]    
     paths:
@@ -9,17 +8,12 @@ on:
     - '!.gitignore'
     - '!README.md'
   
-    
-    
   schedule:
     - cron: '2 2 * * *'
 
 jobs:
-
   build:    
-  
     runs-on: ubuntu-latest
-    
     
     steps:
     - uses: actions/checkout@v6
@@ -31,14 +25,39 @@ jobs:
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
-
       
     - name: Build
       run: dotnet build -c Release
       
-    - name: Run
+    - name: Run and Notify
       env:        
-        accounts: ${{secrets.ACCOUNTS}}
-      run: dotnet run -- ${accounts}
-     
+        accounts: ${{ secrets.ACCOUNTS }}
+        WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
+      run: |
+        # 捕获 dotnet 运行的所有输出内容（包括标准输出和错误输出）
+        set +e
+        OUTPUT=$(dotnet run -- ${accounts} 2>&1)
+        EXIT_CODE=$?
+        set -e
         
+        # 在 GitHub Actions 日志里也打印一份，方便排查
+        echo "$OUTPUT"
+        
+        # 格式化输出，把多行文本转换成适合 JSON 的单行格式
+        # 1. 把换行替换为 \n
+        # 2. 把双引号转义为 \"
+        # 3. 去除可能存在的终端颜色代码
+        FORMATTED_OUTPUT=$(echo "$OUTPUT" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g' | sed 's/\x1b\[[0-9;]*m//g')
+        
+        # 根据退出码判断是否成功
+        if [ $EXIT_CODE -eq 0 ]; then
+          SUMMARY="哔咔签到报告"
+        else
+          SUMMARY="哔咔签到异常"
+        fi
+        
+        # 发送推送到 WxPusher
+        echo "正在发送通知..."
+        curl -s -X POST "https://wxpusher.zjiecode.com/api/send/message/simple-push" \
+          -H "Content-Type: application/json" \
+          -d "{\"spt\":\"${WXPUSHER_SPT}\",\"summary\":\"${SUMMARY}\",\"content\":\"${FORMATTED_OUTPUT}\"}"
